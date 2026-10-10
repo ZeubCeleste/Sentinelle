@@ -1,0 +1,7 @@
+# Rust
+/target
+
+# Config/journal locaux (jamais sur GitHub : spécifiques à ta machine)
+config.json
+sentinelle.log
+dossiers.txt
