@@ -1,7 +1,10 @@
 # Rust
 /target
 
-# Config/journal locaux (jamais sur GitHub : spécifiques à ta machine)
+# Built executable kept at project root for easy double-click (not versioned)
+/Sentinelle.exe
+
+# Local config/log (never on GitHub: machine-specific)
 config.json
 sentinelle.log
 dossiers.txt

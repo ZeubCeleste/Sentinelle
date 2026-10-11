@@ -237,11 +237,40 @@ fn usage() {
     );
 }
 
+/// Lancement par double-clic (sans argument) : met en place la config la première
+/// fois (détection + mot de passe), puis lance la surveillance en arrière-plan.
+fn run_default() -> Result<()> {
+    println!("🛡️  Sentinelle — surveillance de tes dossiers sensibles\n");
+
+    // 1re utilisation : détecter les dossiers
+    let cfg = Config::load()?;
+    if cfg.folders.is_empty() {
+        println!("Première utilisation : détection des dossiers sensibles...\n");
+        cmd_scan()?;
+        println!();
+    }
+
+    // 1re utilisation : créer le mot de passe maître
+    let cfg = Config::load()?;
+    if !cfg.is_initialized() {
+        cmd_init()?;
+        println!();
+    }
+
+    // surveillance (demande le mot de passe, puis veille en arrière-plan)
+    cmd_guard()
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
-        usage();
-        std::process::exit(2);
+        if let Err(e) = run_default() {
+            eprintln!("Erreur : {e:#}");
+            // laisse la fenêtre ouverte pour lire le message en cas de double-clic
+            let _ = std::io::stdin().read_line(&mut String::new());
+            std::process::exit(1);
+        }
+        return;
     }
     let need_dir = |a: &[String]| -> Result<PathBuf> {
         a.get(2).map(PathBuf::from).ok_or_else(|| anyhow::anyhow!("chemin du dossier manquant"))
