@@ -7,4 +7,4 @@
 # Local config/log (never on GitHub: machine-specific)
 config.json
 sentinelle.log
-dossiers.txt
+folders.txt

@@ -1,4 +1,4 @@
-//! Utilitaires système Windows : process en cours, inactivité, fenêtre console.
+//! Windows system helpers: running processes, user inactivity.
 
 use std::collections::HashSet;
 
@@ -9,7 +9,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 
-/// Renvoie l'ensemble (en minuscules) des exécutables en cours d'exécution.
+/// Returns the set (lowercased) of currently running executables.
 pub fn running_processes() -> HashSet<String> {
     let mut set = HashSet::new();
     unsafe {
@@ -38,12 +38,12 @@ pub fn running_processes() -> HashSet<String> {
     set
 }
 
-/// Vrai si au moins un des exécutables est en cours d'exécution.
+/// True if at least one of the executables is currently running.
 pub fn any_running(procs: &[String], running: &HashSet<String>) -> bool {
     procs.iter().any(|p| running.contains(&p.to_lowercase()))
 }
 
-/// Secondes depuis la dernière activité clavier/souris de l'utilisateur.
+/// Seconds since the user's last keyboard/mouse activity.
 pub fn idle_seconds() -> u64 {
     unsafe {
         let mut info = LASTINPUTINFO {
@@ -53,7 +53,7 @@ pub fn idle_seconds() -> u64 {
         if GetLastInputInfo(&mut info).as_bool() {
             let now = GetTickCount64();
             let last = info.dwTime as u64;
-            // GetTickCount64 et dwTime partagent la base de temps (ms depuis boot)
+            // GetTickCount64 and dwTime share the same time base (ms since boot)
             now.saturating_sub(last) / 1000
         } else {
             0

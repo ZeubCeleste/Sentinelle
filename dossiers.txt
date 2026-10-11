@@ -1,0 +1,19 @@
+# Dossiers suivis par Sentinelle (généré par 'scan').
+# Liste indicative, modifiable. La vraie config est dans %APPDATA%\Sentinelle\config.json
+
+# --- Navigateurs ---
+C:\Users\elias\AppData\Local\Google\Chrome\User Data
+C:\Users\elias\AppData\Local\Microsoft\Edge\User Data
+C:\Users\elias\AppData\Local\BraveSoftware\Brave-Browser\User Data
+# --- Messageries ---
+C:\Users\elias\AppData\Roaming\discord
+C:\Users\elias\AppData\Roaming\discordcanary
+# --- Jeux ---
+C:\Program Files (x86)\Steam\config
+C:\Users\elias\AppData\Local\EpicGamesLauncher\Saved\Config
+C:\Users\elias\AppData\Local\Riot Games
+C:\Users\elias\AppData\Local\Rockstar Games
+C:\Users\elias\AppData\Roaming\.minecraft
+C:\Users\elias\AppData\Local\Roblox\LocalStorage
+# --- Développement ---
+C:\Users\elias\AppData\Roaming\GitHub CLI

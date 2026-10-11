@@ -1,4 +1,4 @@
-//! Verrouillage / déverrouillage d'un dossier (chiffrement fichier par fichier).
+//! Locking / unlocking a folder (file-by-file encryption).
 
 use std::fs;
 use std::io::Write;
@@ -15,7 +15,7 @@ use crate::crypto::{self, SessionKey};
 pub const MARKER: &str = ".sentinelle.lock";
 pub const ENC_EXT: &str = "sfl";
 
-/// Marqueur en clair déposé dans un dossier verrouillé (ne contient aucun secret).
+/// Cleartext marker dropped into a locked folder (contains no secret).
 #[derive(Serialize, Deserialize)]
 pub struct Marker {
     pub version: u32,
@@ -29,8 +29,8 @@ pub fn read_marker(dir: &Path) -> Result<Option<Marker>> {
     if !p.exists() {
         return Ok(None);
     }
-    let txt = fs::read_to_string(&p).context("lecture du marqueur")?;
-    Ok(Some(serde_json::from_str(&txt).context("marqueur corrompu")?))
+    let txt = fs::read_to_string(&p).context("reading the marker")?;
+    Ok(Some(serde_json::from_str(&txt).context("corrupted marker")?))
 }
 
 pub fn is_locked(dir: &Path) -> bool {
@@ -38,18 +38,18 @@ pub fn is_locked(dir: &Path) -> bool {
 }
 
 fn write_marker(dir: &Path, m: &Marker) -> Result<()> {
-    fs::write(dir.join(MARKER), serde_json::to_vec_pretty(m)?).context("écriture du marqueur")?;
+    fs::write(dir.join(MARKER), serde_json::to_vec_pretty(m)?).context("writing the marker")?;
     Ok(())
 }
 
 fn write_atomic(target: &Path, data: &[u8]) -> Result<()> {
     let tmp = target.with_extension(format!("sfltmp{}", u32::from_le_bytes(crypto::random_bytes::<4>())));
     {
-        let mut f = fs::File::create(&tmp).context("création du fichier temporaire")?;
+        let mut f = fs::File::create(&tmp).context("creating the temporary file")?;
         f.write_all(data)?;
         f.sync_all()?;
     }
-    fs::rename(&tmp, target).context("remplacement du fichier")?;
+    fs::rename(&tmp, target).context("replacing the file")?;
     Ok(())
 }
 
@@ -66,7 +66,7 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// `a/b/fichier.txt` -> `a/b/fichier.txt.sfl`
+/// `a/b/file.txt` -> `a/b/file.txt.sfl`
 fn append_ext(p: &Path, ext: &str) -> PathBuf {
     let mut s = p.as_os_str().to_owned();
     s.push(".");
@@ -74,13 +74,13 @@ fn append_ext(p: &Path, ext: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// `a/b/fichier.txt.sfl` -> `a/b/fichier.txt`
+/// `a/b/file.txt.sfl` -> `a/b/file.txt`
 fn strip_ext(p: &Path) -> PathBuf {
     p.with_extension("")
 }
 
-/// Verrouille un dossier avec une clé déjà dérivée + le sel/vérificateur à inscrire.
-/// Renvoie le nombre de fichiers chiffrés.
+/// Locks a folder with an already-derived key + the salt/verifier to record.
+/// Returns the number of encrypted files.
 pub fn lock_with_key(
     dir: &Path,
     key: &SessionKey,
@@ -89,21 +89,21 @@ pub fn lock_with_key(
     verifier_b64: &str,
 ) -> Result<usize> {
     if !dir.is_dir() {
-        bail!("dossier introuvable : {}", dir.display());
+        bail!("folder not found: {}", dir.display());
     }
     if is_locked(dir) {
-        bail!("déjà verrouillé : {}", dir.display());
+        bail!("already locked: {}", dir.display());
     }
     let mut done = 0usize;
     for path in files_in(dir) {
         if path.extension().and_then(|e| e.to_str()) == Some(ENC_EXT) {
             continue;
         }
-        let data = fs::read(&path).with_context(|| format!("lecture {}", path.display()))?;
+        let data = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
         let blob = crypto::encrypt_blob(key, &data)?;
         let enc = append_ext(&path, ENC_EXT);
         write_atomic(&enc, &blob)?;
-        fs::remove_file(&path).with_context(|| format!("suppression {}", path.display()))?;
+        fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
         done += 1;
     }
     write_marker(
@@ -118,30 +118,30 @@ pub fn lock_with_key(
     Ok(done)
 }
 
-/// Déverrouille un dossier avec une clé déjà dérivée (valide d'abord le vérificateur).
+/// Unlocks a folder with an already-derived key (validates the verifier first).
 pub fn unlock_with_key(dir: &Path, key: &SessionKey) -> Result<usize> {
-    let marker = read_marker(dir)?.ok_or_else(|| anyhow!("pas verrouillé : {}", dir.display()))?;
-    let vnonce = B64.decode(&marker.verifier_nonce).context("nonce invalide")?;
-    let vct = B64.decode(&marker.verifier).context("vérificateur invalide")?;
+    let marker = read_marker(dir)?.ok_or_else(|| anyhow!("not locked: {}", dir.display()))?;
+    let vnonce = B64.decode(&marker.verifier_nonce).context("invalid nonce")?;
+    let vct = B64.decode(&marker.verifier).context("invalid verifier")?;
     if !crypto::check_verifier(key, &vnonce, &vct) {
-        bail!("mauvais mot de passe");
+        bail!("wrong password");
     }
     let mut done = 0usize;
     for path in files_in(dir) {
         if path.extension().and_then(|e| e.to_str()) != Some(ENC_EXT) {
             continue;
         }
-        let blob = fs::read(&path).with_context(|| format!("lecture {}", path.display()))?;
-        let data = crypto::decrypt_blob(key, &blob).with_context(|| format!("fichier {}", path.display()))?;
+        let blob = fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        let data = crypto::decrypt_blob(key, &blob).with_context(|| format!("file {}", path.display()))?;
         write_atomic(&strip_ext(&path), &data)?;
-        fs::remove_file(&path).with_context(|| format!("suppression {}", path.display()))?;
+        fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
         done += 1;
     }
-    fs::remove_file(dir.join(MARKER)).context("suppression du marqueur")?;
+    fs::remove_file(dir.join(MARKER)).context("removing the marker")?;
     Ok(done)
 }
 
-/// Nombre de fichiers chiffrés présents.
+/// Number of encrypted files present.
 pub fn count_encrypted(dir: &Path) -> usize {
     files_in(dir)
         .into_iter()
@@ -149,7 +149,7 @@ pub fn count_encrypted(dir: &Path) -> usize {
         .count()
 }
 
-/// Lit le sel d'un dossier verrouillé (base64), si présent.
+/// Reads the salt of a locked folder (base64), if present.
 pub fn salt_of(dir: &Path) -> Result<Option<String>> {
     Ok(read_marker(dir)?.map(|m| m.salt))
 }

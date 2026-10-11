@@ -1,4 +1,4 @@
-//! Configuration persistante de Sentinelle (%APPDATA%\Sentinelle\config.json).
+//! Persistent Sentinelle configuration (%APPDATA%\Sentinelle\config.json).
 
 use std::fs;
 use std::path::PathBuf;
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub struct FolderEntry {
     pub path: String,
     pub category: String,
-    /// Exécutables qui possèdent ce dossier (ne pas verrouiller s'ils tournent).
+    /// Executables that own this folder (don't lock while they are running).
     #[serde(default)]
     pub processes: Vec<String>,
 }
@@ -18,18 +18,18 @@ pub struct FolderEntry {
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub version: u32,
-    /// Sel maître Argon2 (base64) — défini par `init`.
+    /// Argon2 master salt (base64) — set by `init`.
     #[serde(default)]
     pub salt: String,
-    /// Vérificateur maître (base64) pour valider le mot de passe.
+    /// Master verifier (base64) used to validate the password.
     #[serde(default)]
     pub verifier_nonce: String,
     #[serde(default)]
     pub verifier: String,
-    /// Dossiers gérés par l'agent.
+    /// Folders managed by the agent.
     #[serde(default)]
     pub folders: Vec<FolderEntry>,
-    // --- réglages de l'agent ---
+    // --- agent settings ---
     #[serde(default = "d_true")]
     pub lock_on_session_lock: bool,
     #[serde(default = "d_true")]
@@ -67,7 +67,7 @@ impl Default for Config {
 }
 
 pub fn config_dir() -> Result<PathBuf> {
-    let appdata = std::env::var("APPDATA").map_err(|_| anyhow!("variable APPDATA absente"))?;
+    let appdata = std::env::var("APPDATA").map_err(|_| anyhow!("APPDATA variable missing"))?;
     Ok(PathBuf::from(appdata).join("Sentinelle"))
 }
 
@@ -81,16 +81,16 @@ impl Config {
         if !p.exists() {
             return Ok(Config::default());
         }
-        let txt = fs::read_to_string(&p).context("lecture de config.json")?;
-        // tolère un BOM UTF-8 (ajouté par certains éditeurs comme le Bloc-notes)
+        let txt = fs::read_to_string(&p).context("reading config.json")?;
+        // tolerate a UTF-8 BOM (added by some editors such as Notepad)
         let txt = txt.trim_start_matches('\u{feff}');
-        serde_json::from_str(txt).context("config.json corrompu")
+        serde_json::from_str(txt).context("config.json is corrupted")
     }
 
     pub fn save(&self) -> Result<()> {
         let dir = config_dir()?;
-        fs::create_dir_all(&dir).context("création du dossier de config")?;
-        fs::write(config_path()?, serde_json::to_vec_pretty(self)?).context("écriture de config.json")?;
+        fs::create_dir_all(&dir).context("creating the config directory")?;
+        fs::write(config_path()?, serde_json::to_vec_pretty(self)?).context("writing config.json")?;
         Ok(())
     }
 

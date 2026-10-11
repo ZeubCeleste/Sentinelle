@@ -1,9 +1,9 @@
-//! Agent en arrière-plan : verrouille quand tu t'absentes, déverrouille à ton retour.
+//! Background agent: locks when you step away, unlocks when you return.
 //!
-//! Déclencheurs de verrouillage : écran verrouillé (Win+L), inactivité, arrêt/déconnexion.
-//! Au verrouillage, on NE touche PAS aux dossiers dont l'appli propriétaire tourne encore
-//! (sinon on corromprait ses fichiers). La clé reste en mémoire le temps de la session
-//! pour permettre le déverrouillage automatique au retour.
+//! Lock triggers: workstation locked (Win+L), inactivity, shutdown/logoff.
+//! When locking, it does NOT touch folders whose owning app is still running (that would
+//! corrupt their files). The key stays in memory for the session so it can auto-unlock
+//! when you return.
 
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -48,7 +48,7 @@ fn derive(cfg: &Config, password: &str) -> Result<SessionKey> {
     crypto::derive_key(password.as_bytes(), &salt)
 }
 
-/// Verrouille tous les dossiers éligibles (appli fermée, pas déjà verrouillés).
+/// Locks every eligible folder (owning app closed, not already locked).
 fn lock_all() {
     let Some(m) = STATE.get() else { return };
     let mut st = m.lock().unwrap();
@@ -58,7 +58,7 @@ fn lock_all() {
     let key = match derive(&st.cfg, &st.password) {
         Ok(k) => k,
         Err(e) => {
-            logln(&format!("verrouillage impossible (clé) : {e}"));
+            logln(&format!("cannot lock (key): {e}"));
             return;
         }
     };
@@ -67,7 +67,7 @@ fn lock_all() {
     let salt = st.cfg.salt.clone();
     let mut n = 0usize;
     let mut skipped = 0usize;
-    // emprunt séparé des champs pour éviter les soucis de borrow
+    // borrow the fields separately to avoid borrow-checker issues
     let folders: Vec<(String, Vec<String>)> =
         st.cfg.folders.iter().map(|f| (f.path.clone(), f.processes.clone())).collect();
     for (path, procs) in &folders {
@@ -82,23 +82,23 @@ fn lock_all() {
         match vault::lock_with_key(dir, &key, &salt, &vnonce, &v) {
             Ok(c) => {
                 n += 1;
-                logln(&format!("🔒 verrouillé {} ({} fichiers)", path, c));
+                logln(&format!("locked {} ({} files)", path, c));
             }
-            Err(e) => logln(&format!("échec verrouillage {} : {e}", path)),
+            Err(e) => logln(&format!("lock failed {}: {e}", path)),
         }
     }
     st.locked = true;
-    logln(&format!("--- verrouillage auto : {} dossier(s), {} ignoré(s) (appli ouverte) ---", n, skipped));
+    logln(&format!("--- auto-lock: {} folder(s), {} skipped (app open) ---", n, skipped));
 }
 
-/// Déverrouille tous les dossiers verrouillés.
+/// Unlocks every locked folder.
 fn unlock_all() {
     let Some(m) = STATE.get() else { return };
     let mut st = m.lock().unwrap();
     let key = match derive(&st.cfg, &st.password) {
         Ok(k) => k,
         Err(e) => {
-            logln(&format!("déverrouillage impossible (clé) : {e}"));
+            logln(&format!("cannot unlock (key): {e}"));
             return;
         }
     };
@@ -112,13 +112,13 @@ fn unlock_all() {
         match vault::unlock_with_key(dir, &key) {
             Ok(c) => {
                 n += 1;
-                logln(&format!("🔓 déverrouillé {} ({} fichiers)", path, c));
+                logln(&format!("unlocked {} ({} files)", path, c));
             }
-            Err(e) => logln(&format!("échec déverrouillage {} : {e}", path)),
+            Err(e) => logln(&format!("unlock failed {}: {e}", path)),
         }
     }
     st.locked = false;
-    logln(&format!("--- déverrouillage auto : {} dossier(s) ---", n));
+    logln(&format!("--- auto-unlock: {} folder(s) ---", n));
 }
 
 fn setting(f: impl Fn(&Config) -> bool) -> bool {
@@ -131,13 +131,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             match wparam.0 as u32 {
                 WTS_SESSION_LOCK => {
                     if setting(|c| c.lock_on_session_lock) {
-                        logln("événement : écran verrouillé (Win+L)");
+                        logln("event: workstation locked (Win+L)");
                         lock_all();
                     }
                 }
                 WTS_SESSION_UNLOCK => {
                     if setting(|c| c.auto_unlock_on_resume) {
-                        logln("événement : retour de l'utilisateur");
+                        logln("event: user returned");
                         unlock_all();
                     }
                 }
@@ -147,10 +147,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
         }
         WM_QUERYENDSESSION => {
             if setting(|c| c.lock_on_shutdown) {
-                logln("événement : arrêt / déconnexion");
+                logln("event: shutdown / logoff");
                 lock_all();
             }
-            LRESULT(1) // autorise l'arrêt
+            LRESULT(1) // allow the shutdown
         }
         WM_ENDSESSION => {
             if setting(|c| c.lock_on_shutdown) {
@@ -162,15 +162,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     }
 }
 
-/// Lance l'agent (bloquant). `password` a déjà été validé.
+/// Runs the agent (blocking). `password` has already been validated.
 pub fn run(cfg: Config, password: String) -> Result<()> {
-    // valider la clé avant tout
+    // validate the key first
     {
         let key = derive(&cfg, &password)?;
         let vnonce = B64.decode(&cfg.verifier_nonce)?;
         let v = B64.decode(&cfg.verifier)?;
         if !crypto::check_verifier(&key, &vnonce, &v) {
-            bail!("mauvais mot de passe");
+            bail!("wrong password");
         }
     }
 
@@ -178,13 +178,13 @@ pub fn run(cfg: Config, password: String) -> Result<()> {
     let lock_on_idle = cfg.lock_on_idle;
     STATE
         .set(Mutex::new(GuardState { cfg, password, locked: false }))
-        .map_err(|_| anyhow::anyhow!("agent déjà initialisé"))?;
+        .map_err(|_| anyhow::anyhow!("agent already initialized"))?;
 
-    logln("=== Sentinelle démarrée ===");
-    // à l'ouverture de session, on déverrouille ce qui restait verrouillé
+    logln("=== Sentinelle started ===");
+    // at session start, unlock anything that was left locked
     unlock_all();
 
-    // surveillance de l'inactivité dans un thread séparé
+    // watch inactivity in a separate thread
     if lock_on_idle {
         std::thread::spawn(move || {
             let threshold = idle_minutes.saturating_mul(60).max(60);
@@ -192,14 +192,14 @@ pub fn run(cfg: Config, password: String) -> Result<()> {
                 std::thread::sleep(Duration::from_secs(15));
                 let already = STATE.get().map(|m| m.lock().unwrap().locked).unwrap_or(true);
                 if !already && crate::sysutil::idle_seconds() >= threshold {
-                    logln(&format!("inactivité ≥ {} min", idle_minutes));
+                    logln(&format!("inactivity >= {} min", idle_minutes));
                     lock_all();
                 }
             }
         });
     }
 
-    // fenêtre message-only + notifications de session
+    // message-only window + session notifications
     unsafe {
         let hmod = GetModuleHandleW(None)?;
         let hinst = HINSTANCE(hmod.0);
