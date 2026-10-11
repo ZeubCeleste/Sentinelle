@@ -2,7 +2,7 @@
 name = "sentinelle"
 version = "0.1.0"
 edition = "2021"
-description = "Verrouille (chiffre) des dossiers contenant des données sensibles pour les protéger des stealers."
+description = "Locks (encrypts) folders holding sensitive data to protect them from stealers."
 
 [[bin]]
 name = "sentinelle"

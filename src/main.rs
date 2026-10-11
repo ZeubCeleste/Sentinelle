@@ -183,7 +183,8 @@ fn cmd_guard() -> Result<()> {
     }
     drop(key);
     println!("Agent running. It locks your folders when you step away.");
-    println!("   Keep this window open. Close it to stop protection.");
+    println!("   This window will minimize itself. Close it to stop protection.");
+    sysutil::minimize_console();
     guard::run(cfg, password)
 }
 

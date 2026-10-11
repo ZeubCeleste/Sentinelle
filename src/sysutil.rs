@@ -3,11 +3,13 @@
 use std::collections::HashSet;
 
 use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::System::Console::GetConsoleWindow;
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MINIMIZE};
 
 /// Returns the set (lowercased) of currently running executables.
 pub fn running_processes() -> HashSet<String> {
@@ -41,6 +43,16 @@ pub fn running_processes() -> HashSet<String> {
 /// True if at least one of the executables is currently running.
 pub fn any_running(procs: &[String], running: &HashSet<String>) -> bool {
     procs.iter().any(|p| running.contains(&p.to_lowercase()))
+}
+
+/// Minimizes the console window to the taskbar (the agent keeps running in background).
+pub fn minimize_console() {
+    unsafe {
+        let hwnd = GetConsoleWindow();
+        if !hwnd.0.is_null() {
+            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+        }
+    }
 }
 
 /// Seconds since the user's last keyboard/mouse activity.
