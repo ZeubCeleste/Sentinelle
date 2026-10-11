@@ -44,10 +44,10 @@ cargo build --release
 The executable is produced at `target\release\sentinelle.exe`.
 
 ### Easiest way: double-click
-Just run `sentinelle.exe`. On first launch it detects your sensitive folders, asks you to
-set a master password, then starts watching in the background. On later launches it only
-asks for the password and resumes watching. Keep the window open (minimize it) — it's the
-watcher. Close it to stop protection.
+Just run `sentinelle.exe`. It has **no console window** (nothing in the taskbar): a small
+dialog asks for the master password once, then it watches silently in the background.
+On first launch it also detects your sensitive folders and lets you create the password.
+To stop it, end the `sentinelle.exe` process from Task Manager.
 
 ### Command line
 ```bash

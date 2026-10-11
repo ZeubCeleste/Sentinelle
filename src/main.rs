@@ -10,11 +10,14 @@
 //! Double-clicking the exe (no argument) runs the background watcher, setting things
 //! up (detection + password) on first launch.
 
+#![windows_subsystem = "windows"]
+
 mod catalog;
 mod config;
 mod crypto;
 mod guard;
 mod sysutil;
+mod ui;
 mod vault;
 
 use std::io::Write;
@@ -164,30 +167,6 @@ fn cmd_list() -> Result<()> {
     Ok(())
 }
 
-// ------------------------------------------------------------------- guard
-fn cmd_guard() -> Result<()> {
-    let cfg = Config::load()?;
-    if !cfg.is_initialized() {
-        bail!("master password not set. Run 'sentinelle init' first.");
-    }
-    if cfg.folders.is_empty() {
-        bail!("no tracked folder. Run 'sentinelle scan' first.");
-    }
-    println!("Sentinelle — protection agent. Enter the master password to start.");
-    let password = prompt_password(false)?;
-    let key = crypto::derive_key(password.as_bytes(), &B64.decode(&cfg.salt)?)?;
-    let vnonce = B64.decode(&cfg.verifier_nonce)?;
-    let v = B64.decode(&cfg.verifier)?;
-    if !crypto::check_verifier(&key, &vnonce, &v) {
-        bail!("wrong password");
-    }
-    drop(key);
-    println!("Agent running. It locks your folders when you step away.");
-    println!("   This window will minimize itself. Close it to stop protection.");
-    sysutil::minimize_console();
-    guard::run(cfg, password)
-}
-
 // ------------------------------------------------------- manual lock/unlock/status
 fn cmd_lock(dir: &Path) -> Result<()> {
     if vault::is_locked(dir) {
@@ -250,40 +229,87 @@ fn usage() {
     );
 }
 
-/// Double-click launch (no argument): sets things up on first run (detection +
-/// password), then starts watching in the background.
-fn run_default() -> Result<()> {
-    println!("Sentinelle - watching your sensitive folders\n");
+/// Windowless background launch (double-click or the "guard" command): sets things up on
+/// first run (silent detection + a password dialog), then watches with no visible window.
+fn run_background() -> Result<()> {
+    let mut cfg = Config::load()?;
 
-    // first run: detect folders
-    let cfg = Config::load()?;
+    // first run: detect sensitive folders (silent)
     if cfg.folders.is_empty() {
-        println!("First run: detecting sensitive folders...\n");
-        cmd_scan()?;
-        println!();
+        for f in &catalog::detect() {
+            cfg.folders.push(FolderEntry {
+                path: f.path.to_string_lossy().to_string(),
+                category: f.category.clone(),
+                processes: f.processes.clone(),
+            });
+        }
+        cfg.save()?;
+    }
+    if cfg.folders.is_empty() {
+        ui::message("No sensitive folder found to protect.", true);
+        return Ok(());
     }
 
-    // first run: create the master password
-    let cfg = Config::load()?;
-    if !cfg.is_initialized() {
-        cmd_init()?;
-        println!();
-    }
+    // ensure a master password, then obtain it for this session
+    let password = if cfg.is_initialized() {
+        loop {
+            let Some(p) = ui::password_dialog("Enter your Sentinelle master password:") else {
+                return Ok(());
+            };
+            let key = crypto::derive_key(p.as_bytes(), &B64.decode(&cfg.salt)?)?;
+            if crypto::check_verifier(&key, &B64.decode(&cfg.verifier_nonce)?, &B64.decode(&cfg.verifier)?) {
+                break p;
+            }
+            ui::message("Wrong password.", true);
+        }
+    } else {
+        loop {
+            let Some(p1) = ui::password_dialog("Create your master password (do NOT forget it):") else {
+                return Ok(());
+            };
+            if p1.is_empty() {
+                ui::message("Empty password rejected.", true);
+                continue;
+            }
+            let Some(p2) = ui::password_dialog("Confirm your master password:") else {
+                return Ok(());
+            };
+            if p1 != p2 {
+                ui::message("Passwords do not match.", true);
+                continue;
+            }
+            let salt = crypto::random_bytes::<16>();
+            let key = crypto::derive_key(p1.as_bytes(), &salt)?;
+            let (vn, v) = crypto::make_verifier(&key)?;
+            cfg.salt = B64.encode(salt);
+            cfg.verifier_nonce = B64.encode(vn);
+            cfg.verifier = B64.encode(v);
+            cfg.save()?;
+            break p1;
+        }
+    };
 
-    // watch (asks for the password, then guards in the background)
-    cmd_guard()
+    // runs with no visible window (nothing in the taskbar)
+    guard::run(cfg, password)
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        if let Err(e) = run_default() {
-            eprintln!("Error: {e:#}");
-            // keep the window open to read the message when double-clicked
-            let _ = std::io::stdin().read_line(&mut String::new());
+
+    // Double-click (no arg) or "guard": windowless background app.
+    if args.len() < 2 || args[1] == "guard" {
+        if let Err(e) = run_background() {
+            ui::message(&format!("Error: {e:#}"), true);
             std::process::exit(1);
         }
         return;
+    }
+
+    // CLI commands: attach to the parent console so output shows when run from a terminal.
+    unsafe {
+        let _ = windows::Win32::System::Console::AttachConsole(
+            windows::Win32::System::Console::ATTACH_PARENT_PROCESS,
+        );
     }
     let need_dir = |a: &[String]| -> Result<PathBuf> {
         a.get(2).map(PathBuf::from).ok_or_else(|| anyhow::anyhow!("missing folder path"))
@@ -292,7 +318,6 @@ fn main() {
         "scan" => cmd_scan(),
         "init" => cmd_init(),
         "list" => cmd_list(),
-        "guard" => cmd_guard(),
         "lock" => need_dir(&args).and_then(|d| cmd_lock(&d)),
         "unlock" => need_dir(&args).and_then(|d| cmd_unlock(&d)),
         "status" => need_dir(&args).and_then(|d| cmd_status(&d)),
